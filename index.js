@@ -2,6 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 const stockRoutes = require('./routes/stocks.route');
+const uploadRoutes = require('./routes/upload.route');
 
 // Load environment variables from .env file
 dotenv.config();
@@ -22,6 +23,7 @@ mongoose.connect(process.env.MONGODB_URI, {
 
 // Use stock routes
 app.use('/api/stocks', stockRoutes);
+app.use('/api/upload', uploadRoutes);
 
 // Define the port to listen on
 const PORT = process.env.PORT || 5000;
