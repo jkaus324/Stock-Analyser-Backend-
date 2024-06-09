@@ -1,78 +1,85 @@
+const mongoose = require('mongoose');
+const csv = require('csv-parser');
 const fs = require('fs');
 const path = require('path');
-const csv = require('csv-parser');
 const Stock = require('../models/stocks.model');
 
-const uploadStocks = (req, res) => {
-  const directoryPath = path.join(__dirname, '../lists');
-
-  fs.readdir(directoryPath, (err, files) => {
-    if (err) {
-      return res.status(500).json({ message: 'Unable to scan directory', error: err });
-    }
-
-    let results = [];
-    let filesProcessed = 0;
-
-    files.forEach((file) => {
-      const filePath = path.join(directoryPath, file);
-
-      let category;
-      let isHeader = true;
-
-      fs.createReadStream(filePath)
-        .pipe(csv())
-        .on('data', (data) => {
-          // Normalize keys by trimming spaces and newlines
-          const trimmedData = {};
-          for (const key in data) {
-            const trimmedKey = key.trim();
-            trimmedData[trimmedKey] = data[key];
-          }
-
-          // Debug logging
-          console.log('Trimmed Data:', trimmedData);
-
-          if (isHeader) {
-            category = trimmedData['SYMBOL']; // First element represents the category
-            isHeader = false;
-          } else {
-            // For all rows starting from the 17th line, set stock values to zero
-            const symbol = trimmedData['SYMBOL'];
-            const name = symbol; // Set name to symbol for now
-
-            if (symbol) {
-              results.push({
-                category,
-                stock: {
-                  symbol,
-                  name,
-                  allTimeHigh: 0,
-                  currentPrice: 0,
-                  dateUpdated: new Date(), // Default to current date
-                },
-              });
-            } else {
-              console.warn(`Invalid data row in file ${file}:`, trimmedData);
-            }
-          }
-        })
-        .on('end', async () => {
-          filesProcessed++;
-          if (filesProcessed === files.length) {
-            try {
-              await Stock.insertMany(results);
-              res.status(200).json({ message: 'Stocks uploaded successfully!' });
-            } catch (error) {
-              console.error('Failed to upload stocks:', error);
-              res.status(500).json({ message: 'Failed to upload stocks', error });
-            }
-          }
-        });
+// Helper function to parse CSV file
+const parseCSV = (filePath) => {
+    return new Promise((resolve, reject) => {
+        const results = [];
+        fs.createReadStream(filePath)
+            .pipe(csv())
+            .on('data', (data) => results.push(data))
+            .on('end', () => resolve(results))
+            .on('error', (error) => reject(error));
     });
-  });
+};
+
+// Function to safely parse a number from a string
+const safeParseFloat = (value) => {
+    if (typeof value === 'string') {
+        return parseFloat(value.replace(/,/g, ''));
+    }
+    return NaN;
+};
+
+// Upload function to read CSV files and store data
+const uploadStocks = async (req, res) => {
+    try {
+        const files = fs.readdirSync(path.join(__dirname, '../lists'));
+
+        for (const file of files) {
+            if (path.extname(file) === '.csv') {
+                const filePath = path.join(__dirname, '../lists', file);
+                const data = await parseCSV(filePath);
+
+                for (const row of data) {
+                    // Check for headers and correct them
+                    const headers = Object.keys(row);
+                    const symbolKey = headers[0];
+                    const allTimeHighKey = headers[1];
+                    const currentPriceKey = headers[2];
+
+                    const symbol = row[symbolKey];
+                    const allTimeHighStr = row[allTimeHighKey];
+                    const currentPriceStr = row[currentPriceKey];
+
+                    if (!symbol || !allTimeHighStr || !currentPriceStr) {
+                        console.warn(`Skipping row due to missing data: ${JSON.stringify(row)}`);
+                        continue;
+                    }
+
+                    const allTimeHigh = safeParseFloat(allTimeHighStr);
+                    const currentPrice = safeParseFloat(currentPriceStr);
+
+                    if (isNaN(allTimeHigh) || isNaN(currentPrice)) {
+                        console.warn(`Skipping row due to invalid number format: ${JSON.stringify(row)}`);
+                        continue;
+                    }
+
+                    const stockData = {
+                        category: path.basename(file, '.csv'),
+                        stock: {
+                            symbol: symbol,
+                            allTimeHigh: allTimeHigh,
+                            currentPrice: currentPrice,
+                        }
+                    };
+
+                    const stock = new Stock(stockData);
+                    await stock.save();
+                }
+            }
+        }
+
+        res.status(200).send('Stocks uploaded successfully');
+    } catch (error) {
+        console.error(error);
+        res.status(500).send('An error occurred while uploading stocks');
+    }
 };
 
 module.exports = {
-  uploadStocks,
+    uploadStocks
 };

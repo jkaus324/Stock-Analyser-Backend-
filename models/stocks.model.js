@@ -10,10 +10,6 @@ const stockSchema = new mongoose.Schema({
             type: String,
             required: true
         },
-        name: {
-            type: String,
-            required: true
-        },
         allTimeHigh: {
             type: Number,
             required: true

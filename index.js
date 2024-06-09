@@ -12,17 +12,19 @@ const app = express();
 
 // Middleware to parse JSON bodies
 app.use(express.json());
-
 // Connect to MongoDB
-mongoose.connect(process.env.MONGODB_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-})
-.then(() => console.log('MongoDB connected'))
-.catch((err) => console.log(err));
+mongoose.connect(process.env.MONGODB_URI);
+
+mongoose.connection.on('connected', () => {
+    console.log('MongoDB connected');
+});
+
+mongoose.connection.on('error', (err) => {
+    console.log('MongoDB connection error:', err);
+});
 
 // Use stock routes
-app.use('/api/stocks', stockRoutes);
+app.use('/api', stockRoutes);
 app.use('/api/upload', uploadRoutes);
 
 // Define the port to listen on
