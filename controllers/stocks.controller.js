@@ -1,36 +1,35 @@
-const puppeteer = require('puppeteer');
-const Stock = require('../models/stocks.model');
-const { parse } = require('dotenv');
+const axios = require('axios');
+const cheerio = require('cheerio');
+const Stock = require('../models/stocks.model'); // Assuming you have a Stock model
 
-const scrapeStockData = async (page, company) => {
+const scrapeStockData = async (company) => {
     console.log(`company: ${company}`);
     const url = `https://finance.yahoo.com/quote/${company}.NS`;
     console.log(`url: ${url}`);
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    
+    try {
+        const response = await axios.get(url);
+        const html = response.data;
+        const $ = cheerio.load(html);
 
-    const { currentPrice, highestPrice } = await page.evaluate(() => {
-        const priceElement = document.querySelector('fin-streamer[data-field="regularMarketPrice"] span');
-        const rangeElement = document.querySelector('fin-streamer[data-field="fiftyTwoWeekRange"]');
+        const priceElement = $('fin-streamer[data-field="regularMarketPrice"] span');
+        const rangeElement = $('fin-streamer[data-field="fiftyTwoWeekRange"]');
 
-        const rangeText = rangeElement.getAttribute('data-value');
+        const rangeText = rangeElement.attr('data-value');
         const highestPrice = rangeText.split(' - ')[1].trim();
 
         return {
-            currentPrice: priceElement ? priceElement.textContent.trim() : null,
+            currentPrice: priceElement.text().trim(),
             highestPrice
         };
-    });
-
-    return { currentPrice, fiftyTwoWeekHigh: highestPrice };
+    } catch (error) {
+        console.error(`Error fetching data for ${company}:`, error);
+        return null;
+    }
 };
 
 const updateStockData = async (category) => {
     const stocks = await Stock.find({ category });
-    const browser = await puppeteer.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-        timeout: 60000
-    });
 
     const concurrentLimit = 5;
     let i = 0;
@@ -40,34 +39,29 @@ const updateStockData = async (category) => {
 
         for (let j = 0; j < concurrentLimit && i < stocks.length; j++, i++) {
             promises.push((async (stock) => {
-                const page = await browser.newPage();
                 try {
-                    const stockData = await scrapeStockData(page, stock.symbol);
+                    const stockData = await scrapeStockData(stock.symbol);
                     console.log(`Scraping data for ${stock.symbol}`);
-                    console.log(stockData);
 
-                    if (stockData && stockData.currentPrice && stockData.fiftyTwoWeekHigh) {
-                        stock.currentPrice = parseInt(stockData.currentPrice);
-                        stock.allTimeHigh = parseInt(stockData.fiftyTwoWeekHigh);
+                    if (stockData && stockData.currentPrice && stockData.highestPrice) {
+                        stock.currentPrice = parseFloat(stockData.currentPrice.replace(/,/g, ''));
+                        stock.allTimeHigh = parseFloat(stockData.highestPrice.replace(/,/g, ''));
 
                         await stock.save();
                         console.log(`Updated data for ${stock.symbol}`);
                     }
                 } catch (error) {
                     console.error(`Error scraping data for ${stock.symbol}:`, error);
-                } finally {
-                    await page.close();
                 }
-            })(stocks[i]));
 
-            // Add a small delay between requests to avoid rate limiting
-            await new Promise(resolve => setTimeout(resolve, 2000));
+                // Add a small delay between requests to avoid rate limiting
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            })(stocks[i]));
         }
 
         await Promise.all(promises);
     }
 
-    await browser.close();
     console.log('All stock data updated');
 };
 
