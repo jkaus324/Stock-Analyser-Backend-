@@ -60,11 +60,9 @@ const uploadStocks = async (req, res) => {
 
                     const stockData = {
                         category: path.basename(file, '.csv'),
-                        stock: {
-                            symbol: symbol,
-                            allTimeHigh: allTimeHigh,
-                            currentPrice: currentPrice,
-                        }
+                        symbol: symbol,
+                        allTimeHigh: allTimeHigh,
+                        currentPrice: currentPrice
                     };
 
                     const stock = new Stock(stockData);

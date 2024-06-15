@@ -1,29 +1,27 @@
 const mongoose = require('mongoose');
 
-const stockSchema = new mongoose.Schema({
+const indexSchema = new mongoose.Schema({
     category: {
         type: String,
+        required: true,
+        index: true // Add an index for category
+    },
+    symbol: {
+        type: String,
+        required: true,
+        index: true // Add an index for symbol
+    },
+    allTimeHigh: {
+        type: Number,
         required: true
     },
-    stock: {
-        symbol: {
-            type: String,
-            required: true
-        },
-        allTimeHigh: {
-            type: Number,
-            required: true
-        },
-        currentPrice: {
-            type: Number,
-            required: true
-        },
-        dateUpdated: {
-            type: Date,
-            required: true,
-            default: Date.now
-        }
+    currentPrice: {
+        type: Number,
+        required: true
     }
 });
 
-module.exports = mongoose.model('Stock', stockSchema);
+// Create a compound index on category and symbol
+indexSchema.index({ category: 1, symbol: 1 }, { unique: true });
+
+module.exports = mongoose.model('Stock', indexSchema);

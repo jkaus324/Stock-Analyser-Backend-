@@ -1,87 +1,117 @@
 const puppeteer = require('puppeteer');
 const Stock = require('../models/stocks.model');
+const { parse } = require('dotenv');
 
-const scrapeStockData = async (symbol) => {
-    const url = `https://finance.yahoo.com/quote/${symbol}`;
+const scrapeStockData = async (page, company) => {
+    console.log(`company: ${company}`);
+    const url = `https://finance.yahoo.com/quote/${company}.NS`;
+    console.log(`url: ${url}`);
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
-    const browser = await puppeteer.launch();
-    const page = await browser.newPage();
-    await page.goto(url, { waitUntil: 'networkidle2' });
+    const { currentPrice, highestPrice } = await page.evaluate(() => {
+        const priceElement = document.querySelector('fin-streamer[data-field="regularMarketPrice"] span');
+        const rangeElement = document.querySelector('fin-streamer[data-field="fiftyTwoWeekRange"]');
 
-    const stockData = await page.evaluate(() => {
-        const getTextContent = (selector) => {
-            const element = document.querySelector(selector);
-            return element ? element.textContent : null;
-        };
-
-        const currentPrice = getTextContent('fin-streamer[data-field="regularMarketPrice"]');
-        const fiftyTwoWeekRange = getTextContent('td[data-test="FIFTY_TWO_WK_RANGE-value"]');
-
-        if (!fiftyTwoWeekRange) {
-            return null;
-        }
-
-        const fiftyTwoWeekHigh = fiftyTwoWeekRange.split(' - ')[1];
+        const rangeText = rangeElement.getAttribute('data-value');
+        const highestPrice = rangeText.split(' - ')[1].trim();
 
         return {
-            currentPrice: parseFloat(currentPrice.replace(/,/g, '')),
-            fiftyTwoWeekHigh: parseFloat(fiftyTwoWeekHigh.replace(/,/g, ''))
+            currentPrice: priceElement ? priceElement.textContent.trim() : null,
+            highestPrice
         };
     });
 
-    await browser.close();
-
-    return stockData;
+    return { currentPrice, fiftyTwoWeekHigh: highestPrice };
 };
 
 const updateStockData = async (category) => {
     const stocks = await Stock.find({ category });
-
-    // Use concurrency for faster scraping
-    const promises = stocks.map(async (stock) => {
-        try {
-            console.log(`Scraping data for ${stock.stock.symbol}`);
-            const stockData = await scrapeStockData(stock.stock.symbol);
-
-            if (stockData && stockData.currentPrice && stockData.fiftyTwoWeekHigh) {
-                stock.stock.currentPrice = stockData.currentPrice;
-                stock.stock.allTimeHigh = stockData.fiftyTwoWeekHigh;
-
-                await stock.save();
-                console.log(`Updated data for ${stock.stock.symbol}`);
-            }
-        } catch (error) {
-            console.error(`Error scraping data for ${stock.stock.symbol}:`, error);
-        }
+    const browser = await puppeteer.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        timeout: 60000
     });
 
-    await Promise.all(promises);
+    const concurrentLimit = 5;
+    let i = 0;
+
+    while (i < stocks.length) {
+        const promises = [];
+
+        for (let j = 0; j < concurrentLimit && i < stocks.length; j++, i++) {
+            promises.push((async (stock) => {
+                const page = await browser.newPage();
+                try {
+                    const stockData = await scrapeStockData(page, stock.symbol);
+                    console.log(`Scraping data for ${stock.symbol}`);
+                    console.log(stockData);
+
+                    if (stockData && stockData.currentPrice && stockData.fiftyTwoWeekHigh) {
+                        stock.currentPrice = parseInt(stockData.currentPrice);
+                        stock.allTimeHigh = parseInt(stockData.fiftyTwoWeekHigh);
+
+                        await stock.save();
+                        console.log(`Updated data for ${stock.symbol}`);
+                    }
+                } catch (error) {
+                    console.error(`Error scraping data for ${stock.symbol}:`, error);
+                } finally {
+                    await page.close();
+                }
+            })(stocks[i]));
+
+            // Add a small delay between requests to avoid rate limiting
+            await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+
+        await Promise.all(promises);
+    }
+
+    await browser.close();
     console.log('All stock data updated');
 };
 
 // Get stocks below a certain percentage of their all-time high
 const getStocksBelowPercentage = async (req, res) => {
-  const { category, percentage } = req.params;
+    const { category, percentage } = req.params;
 
-  try {
-    // Update stock data
-    console.log(`Updating stock data for category: ${category}`);
-    await updateStockData(category);
+    try {
+        // Update stock data
+        console.log(`Updating stock data for category: ${category}`);
+        await updateStockData(category);
 
-    // Find and filter stocks
-    const stocks = await Stock.find({ category });
-    const filteredStocks = stocks.filter(stock => {
-      const diffPercentage = ((stock.stock.allTimeHigh - stock.stock.currentPrice) / stock.stock.currentPrice) * 100;
-      return diffPercentage >= percentage;
-    });
+        // Find and filter stocks
+        const stocks = await Stock.find({ category });
+        const filteredStocks = stocks.filter(stock => {
+            const diffPercentage = ((stock.allTimeHigh - stock.currentPrice) / stock.currentPrice) * 100;
+            if (diffPercentage <= 0) {
+                console.log(stock.symbol);
+                console.log("currentPrice", stock.currentPrice);
+                console.log("allTimeHigh", stock.allTimeHigh);
+            }
+            return diffPercentage >= percentage;
+        });
 
-    res.json(filteredStocks);
-  } catch (err) {
-    console.error('Error:', err);
-    res.status(500).json({ message: err.message });
-  }
+        console.log("number of filteredStocks", filteredStocks.length);
+        res.json(filteredStocks);
+    } catch (err) {
+        console.error('Error:', err);
+        res.status(500).json({ message: err.message });
+    }
+};
+
+// Get unique categories
+const getUniqueCategories = async (req, res) => {
+    try {
+        const uniqueCategories = await Stock.distinct('category');
+        res.json(uniqueCategories);
+    } catch (err) {
+        console.error('Error:', err);
+        res.status(500).json({ message: err.message });
+    }
 };
 
 module.exports = {
-  getStocksBelowPercentage,
+    getStocksBelowPercentage,
+    getUniqueCategories
 };
