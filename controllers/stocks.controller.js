@@ -1,24 +1,39 @@
 const Stock = require('../models/stocks.model'); // Assuming you have a Stock model
 const puppeteer = require('puppeteer');
-const puppeteer = require('puppeteer');
-
 
 const scrapeStockData = async (page, company) => {
-    console.log(`company: ${company}`);
+    console.log(`company: ${ company }`);
     const url = `https://finance.yahoo.com/quote/${company}.NS`;
-    console.log(`url: ${url}`);
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
-    const { currentPrice, highestPrice } = await page.evaluate(() => {
+    const stockData = await page.evaluate(() => {
         const priceElement = document.querySelector('fin-streamer[data-field="regularMarketPrice"] span');
         const rangeElement = document.querySelector('fin-streamer[data-field="fiftyTwoWeekRange"]');
+
+        const currentPrice = priceElement ? parseFloat(priceElement.textContent.trim().replace(/,/g, '')) : null;
+        let fiftyTwoWeekHigh = null;
+        if (rangeElement) {
+            const rangeText = rangeElement.getAttribute('data-value');
+            fiftyTwoWeekHigh = parseFloat(rangeText.split(' - ')[1].trim().replace(/,/g, ''));
+        }
+
+        return { currentPrice, fiftyTwoWeekHigh };
+    });
+
+    if (stockData.currentPrice === null || stockData.currentPrice === 206.52) {
+        console.error(`Failed to retrieve correct current price for ${company}.`);
+    }
+
+    return stockData;
 };
-
-
 
 const updateStockData = async (category) => {
     const stocks = await Stock.find({ category });
-    const browser = await puppeteer.launch();
+    const browser = await puppeteer.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        timeout: 60000
+    });
 
     const concurrentLimit = 5;
     let i = 0;
@@ -28,24 +43,26 @@ const updateStockData = async (category) => {
 
         for (let j = 0; j < concurrentLimit && i < stocks.length; j++, i++) {
             promises.push((async (stock) => {
+                const page = await browser.newPage();
                 try {
-                    const stockData = await scrapeStockData(browser, stock.symbol);
-                    if (stockData && stockData.currentPrice && stockData.highestPrice) {
-                        stock.currentPrice = parseFloat(stockData.currentPrice.replace(/,/g, ''));
-                        stock.allTimeHigh = parseFloat(stockData.highestPrice.replace(/,/g, ''));
+                    const stockData = await scrapeStockData(page, stock.symbol);
+                    console.log(`Scraping data for ${stock.symbol}`);
+
+                    if (stockData && stockData.currentPrice && stockData.fiftyTwoWeekHigh) {
+                        stock.currentPrice = parseInt(stockData.currentPrice);
+                        stock.allTimeHigh = parseInt(stockData.fiftyTwoWeekHigh);
 
                         await stock.save();
-                        console.log(`Updated data for ${stock.symbol}`);
-                    } else {
-                        console.warn(`No data found for ${stock.symbol}`);
                     }
                 } catch (error) {
-                    console.error(`Error scraping data for ${stock.symbol}:`, error.message);
+                    console.error(`Error scraping data for ${stock.symbol}:`, error);
+                } finally {
+                    await page.close();
                 }
-
-                // Add a small delay between requests to avoid rate limiting
-                await new Promise(resolve => setTimeout(resolve, 2000));
             })(stocks[i]));
+
+            // Add a small delay between requests to avoid rate limiting
+            await new Promise(resolve => setTimeout(resolve, 2000));
         }
 
         await Promise.all(promises);
@@ -61,21 +78,22 @@ const getStocksBelowPercentage = async (req, res) => {
 
     try {
         // Update stock data
-        // console.log(`Updating stock data for category: ${category}`);
+        console.log(`Updating stock data for category: ${category}`);
         await updateStockData(category);
 
         // Find and filter stocks
         const stocks = await Stock.find({ category });
         const filteredStocks = stocks.filter(stock => {
-            let diffPercentage = 0;
-            if (stock.allTimeHigh >= 10 && stock.currentPrice >= 10) {
-                diffPercentage = ((stock.allTimeHigh - stock.currentPrice) / stock.allTimeHigh) * 100;
+            const diffPercentage = ((stock.allTimeHigh - stock.currentPrice) / stock.currentPrice) * 100;
+            if (diffPercentage <= 0) {
+                console.log(stock.symbol);
+                console.log("currentPrice", stock.currentPrice);
+                console.log("allTimeHigh", stock.allTimeHigh);
             }
-
             return diffPercentage >= percentage;
         });
 
-        console.log("Number of filtered stocks:", filteredStocks.length);
+        console.log("number of filteredStocks", filteredStocks.length);
         res.json(filteredStocks);
     } catch (err) {
         console.error('Error:', err);
