@@ -37,12 +37,13 @@ const updateStockData = async (category) => {
 
     const concurrentLimit = 5;
     let i = 0;
+    const promises = [];  // Move the declaration of promises outside the while loop
 
     while (i < stocks.length) {
-        const promises = [];
+        const batchPromises = [];  // Temporary array to hold the promises for the current batch
 
         for (let j = 0; j < concurrentLimit && i < stocks.length; j++, i++) {
-            promises.push((async (stock) => {
+            batchPromises.push((async (stock) => {
                 const page = await browser.newPage();
                 try {
                     const stockData = await scrapeStockData(page, stock.symbol);
@@ -66,13 +67,20 @@ const updateStockData = async (category) => {
             // Add a small delay between requests to avoid rate limiting
             await new Promise(resolve => setTimeout(resolve, 2000));
         }
-    };
-    await Promise.all(promises);
 
+        // Add the batch promises to the main promises array
+        promises.push(...batchPromises);
+
+        // Wait for the current batch to complete before continuing
+        await Promise.all(batchPromises);
+    }
+
+    await Promise.all(promises);
 
     await browser.close();
     console.log('All stock data updated');
 };
+
 
 // Get stocks below a certain percentage of their all-time high
 const getStocksBelowPercentage = async (req, res) => {

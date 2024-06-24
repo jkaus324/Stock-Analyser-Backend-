@@ -3,12 +3,15 @@ const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 const stockRoutes = require('./routes/stocks.route');
 const uploadRoutes = require('./routes/upload.route');
+const cors = require('cors');
 
 // Load environment variables from .env file
 dotenv.config();
 
 // Initialize Express app
 const app = express();
+
+app.use(cors());
 
 // Middleware to parse JSON bodies
 app.use(express.json());
