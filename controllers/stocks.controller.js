@@ -2,7 +2,7 @@ const Stock = require('../models/stocks.model'); // Assuming you have a Stock mo
 const puppeteer = require('puppeteer');
 
 const scrapeStockData = async (page, company) => {
-    console.log(`company: ${ company }`);
+    console.log(`company: ${company}`);
     const url = `https://finance.yahoo.com/quote/${company}.NS`;
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
@@ -47,12 +47,14 @@ const updateStockData = async (category) => {
                 try {
                     const stockData = await scrapeStockData(page, stock.symbol);
                     console.log(`Scraping data for ${stock.symbol}`);
+                    console.log(stockData);
 
                     if (stockData && stockData.currentPrice && stockData.fiftyTwoWeekHigh) {
                         stock.currentPrice = parseInt(stockData.currentPrice);
                         stock.allTimeHigh = parseInt(stockData.fiftyTwoWeekHigh);
 
                         await stock.save();
+                        console.log(`Updated data for ${stock.symbol}`);
                     }
                 } catch (error) {
                     console.error(`Error scraping data for ${stock.symbol}:`, error);
@@ -64,9 +66,9 @@ const updateStockData = async (category) => {
             // Add a small delay between requests to avoid rate limiting
             await new Promise(resolve => setTimeout(resolve, 2000));
         }
+    };
+    await Promise.all(promises);
 
-        await Promise.all(promises);
-    }
 
     await browser.close();
     console.log('All stock data updated');
@@ -105,6 +107,7 @@ const getStocksBelowPercentage = async (req, res) => {
 const getUniqueCategories = async (req, res) => {
     try {
         const uniqueCategories = await Stock.distinct('category');
+        console.log(uniqueCategories);
         res.json(uniqueCategories);
     } catch (err) {
         console.error('Error:', err);
