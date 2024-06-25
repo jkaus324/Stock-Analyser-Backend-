@@ -1,4 +1,6 @@
-// Function to calculate Exponential Moving Average (EMA)
+const puppeteer = require('puppeteer');
+const Stock = require('../models/stocks.model');
+
 const calculateEMA = (prices, period) => {
     const k = 2 / (period + 1);
     let emaArray = [prices[0]]; // Start with the first price
@@ -22,32 +24,87 @@ const calculateMMA = (prices, period) => {
     return mmaArray;
 };
 
+// Function to scrape stock data from Yahoo Finance
+const scrapeStockData = async (page, company, period) => {
+    const url = `https://finance.yahoo.com/quote/${company}.NS/history/`;
+    await page.goto(url, { waitUntil: 'networkidle2' });
+
+    const stockData = await page.evaluate((period) => {
+        const rows = Array.from(document.querySelectorAll('table[data-test="historical-prices"] tbody tr'));
+        const historicalPrices = rows.slice(0, period).map(row => {
+            const cells = row.querySelectorAll('td');
+            return {
+                date: cells[0].textContent,
+                close: parseFloat(cells[5].textContent.replace(',', ''))
+            };
+        });
+
+        const currentPrice = parseFloat(document.querySelector('fin-streamer[data-field="regularMarketPrice"]')?.textContent.replace(',', '') || null);
+        const fiftyTwoWeekHigh = parseFloat(document.querySelector('td[data-test="FIFTY_TWO_WK_RANGE-value"]')?.textContent.split(' - ')[1].replace(',', '') || null);
+
+        return {
+            currentPrice,
+            fiftyTwoWeekHigh,
+            historicalPrices
+        };
+    }, period);
+
+    return stockData;
+};
+
 // Main function to process multiple stocks
-const processStocks = async (stockList, period) => {
+const processStocks = async (req, res) => {
+    const stockList = req.body.stockList; // Assuming stockList is passed in the request body
+    const period = req.body.period || 10; // Define the period for EMA and MMA
+    const calculateEMAFlag = req.body.calculateEMAFlag; // Set to true if EMA needs to be calculated
+    const calculateMMAFlag = req.body.calculateMMAFlag; // Set to true if MMA needs to be calculated
+
     const browser = await puppeteer.launch();
     const page = await browser.newPage();
 
+    let results = [];
+
     for (const company of stockList) {
-        const stockData = await scrapeStockData(page, company);
-        if (stockData.currentPrice !== null) {
-            const prices = [stockData.currentPrice]; // Assuming this is just a single price for now
+        const stockRecord = await Stock.findOne({ symbol: company }).exec();
+        if (!stockRecord) {
+            continue;
+        }
 
-            // Calculate EMA and MMA
-            const ema = calculateEMA(prices, period);
-            const mma = calculateMMA(prices, period);
+        const stockData = await scrapeStockData(page, company, period);
+        if (stockData.historicalPrices.length > 0) {
+            const prices = stockData.historicalPrices.map(data => data.close);
 
-            console.log(`Stock: ${company}`);
-            console.log(`Current Price: ${stockData.currentPrice}`);
-            console.log(`52-Week High: ${stockData.fiftyTwoWeekHigh}`);
-            console.log(`EMA: ${ema}`);
-            console.log(`MMA: ${mma}`);
+            let ema = null;
+            let mma = null;
+
+            if (calculateEMAFlag) {
+                ema = calculateEMA(prices, period);
+            }
+            if (calculateMMAFlag) {
+                mma = calculateMMA(prices, period);
+            }
+
+            results.push({
+                symbol: company,
+                highestPrice: stockRecord.allTimeHigh,
+                currentPrice: stockRecord.currentPrice,
+                ema: calculateEMAFlag ? ema : null,
+                mma: calculateMMAFlag ? mma : null
+            });
         }
     }
 
     await browser.close();
+    res.json(results);
 };
 
-// Example usage
-const stockList = ['RELIANCE', 'TCS', 'INFY']; // Replace with your list of stocks
-const period = 10; // Replace with your desired period for EMA and MMA
-processStocks(stockList, period);
+module.exports = {
+    processStocks
+};
+// // Example usage
+// const stockList = ['SBIN', 'TCS', 'RELIANCE'];
+// const period = 10; // Define the period for EMA and MMA
+// const calculateEMAFlag = true; // Set to true if EMA needs to be calculated
+// const calculateMMAFlag = true; // Set to true if MMA needs to be calculated
+
+// processStocks(stockList, period, calculateEMAFlag, calculateMMAFlag);
