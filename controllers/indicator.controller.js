@@ -54,10 +54,10 @@ const scrapeStockData = async (page, company, period) => {
 
 // Main function to process multiple stocks
 const processStocks = async (req, res) => {
-    const stockList = req.body.stockList; // Assuming stockList is passed in the request body
-    const period = req.body.period || 10; // Define the period for EMA and MMA
-    const calculateEMAFlag = req.body.calculateEMAFlag; // Set to true if EMA needs to be calculated
-    const calculateMMAFlag = req.body.calculateMMAFlag; // Set to true if MMA needs to be calculated
+    const stockList = JSON.parse(req.query.stockList); // Parse stockList from query string
+    const period = parseInt(req.query.period) || 10; // Define the period for EMA and MMA
+    const calculateEMAFlag = req.query.calculateEMAFlag === 'true'; // Convert to boolean
+    const calculateMMAFlag = req.query.calculateMMAFlag === 'true'; // Convert to boolean
 
     const browser = await puppeteer.launch();
     const page = await browser.newPage();
@@ -97,6 +97,7 @@ const processStocks = async (req, res) => {
     await browser.close();
     res.json(results);
 };
+
 
 module.exports = {
     processStocks

@@ -3,7 +3,7 @@ const puppeteer = require('puppeteer');
 
 const scrapeStockData = async (page, company) => {
     console.log(`company: ${company}`);
-    const url = `https://finance.yahoo.com/quote/${company}.NS/`;
+    const url = `https://finance.yahoo.com/quote/${company}.NS`;
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
     const stockData = await page.evaluate(() => {
@@ -88,7 +88,7 @@ const getStocksBelowPercentage = async (req, res) => {
     try {
         // Update stock data
         console.log(`Updating stock data for category: ${category}`);
-        await updateStockData(category);
+        // await updateStockData(category);
 
         // Find and filter stocks
         const stocks = await Stock.find({ category });
