@@ -2,8 +2,8 @@ const Stock = require('../models/stocks.model'); // Assuming you have a Stock mo
 const puppeteer = require('puppeteer');
 
 const scrapeStockData = async (page, company) => {
-    console.log(`company: ${company}`);
-    const url = `https://finance.yahoo.com/quote/${company}.NS`;
+    // console.log(`company: ${company}`);
+    const url = `https://finance.yahoo.com/quote/${company}.NS/`;
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
     const stockData = await page.evaluate(() => {
@@ -47,7 +47,7 @@ const updateStockData = async (category) => {
                 const page = await browser.newPage();
                 try {
                     const stockData = await scrapeStockData(page, stock.symbol);
-                    console.log(`Scraping data for ${stock.symbol}`);
+                    // console.log(`Scraping data for ${stock.symbol}`);
                     console.log(stockData);
 
                     if (stockData && stockData.currentPrice && stockData.fiftyTwoWeekHigh) {
@@ -55,7 +55,7 @@ const updateStockData = async (category) => {
                         stock.allTimeHigh = parseInt(stockData.fiftyTwoWeekHigh);
 
                         await stock.save();
-                        console.log(`Updated data for ${stock.symbol}`);
+                        // console.log(`Updated data for ${stock.symbol}`);
                     }
                 } catch (error) {
                     console.error(`Error scraping data for ${stock.symbol}:`, error);
@@ -99,7 +99,10 @@ const getStocksBelowPercentage = async (req, res) => {
                 console.log("currentPrice", stock.currentPrice);
                 console.log("allTimeHigh", stock.allTimeHigh);
             }
-            return diffPercentage >= percentage;
+            // if(diffPercentage>=200  || diffPercentage<0){
+            //     console.log(`Percentage of the stock ${stock.symbol} is ${diffPercentage} which is exceptionally out of bound`);
+            // }
+            return (diffPercentage >= percentage) && (diffPercentage<=200);
         });
 
         console.log("number of filteredStocks", filteredStocks.length);
